@@ -234,12 +234,31 @@
 </head>
 <body>
 
+<!-- LOGIN OVERLAY -->
+<div id="loginOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(30,42,94,0.85);display:flex;justify-content:center;align-items:center;z-index:9999;">
+  <div style="background:#fff;padding:30px;border-radius:12px;width:100%;max-width:380px;box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+    <div style="text-align:center;margin-bottom:20px;">
+      <h2 style="font-family:Georgia, serif;margin:0 0 6px;color:#1E2A5E;">Employee Login</h2>
+      <p style="font-size:12px;color:#5B6580;margin:0;">Sign in to access the secure order system</p>
+    </div>
+    <div style="margin-bottom:14px;">
+      <label>Work Email</label>
+      <input type="text" id="loginEmail" placeholder="employee@company.com">
+    </div>
+    <div style="margin-bottom:20px;">
+      <label>Password</label>
+      <input type="password" id="loginPassword" placeholder="••••••••">
+    </div>
+    <button class="btn" onclick="handleLogin()" style="width:100%;">Sign In</button>
+    <div id="loginError" style="color:#B8433C;font-size:12px;margin-top:10px;text-align:center;display:none;"></div>
+  </div>
+</div>
+
 <!-- MAIN APP CONTAINER -->
 <div class="wrap" id="appContainer">
 
   <div class="brand-header">
     <div class="brand-logo-container">
-      <!-- Company Logo Placeholder: Replace icon below with <img src="your-logo.png" style="width:32px;height:32px;"> if you have an image file -->
       <div class="company-logo">SO</div>
       <h2 class="brand-logo-text">SALES ORDER FORM</h2>
     </div>
@@ -250,7 +269,7 @@
     <button class="tab-btn" id="tabLog" onclick="switchTab('log')">Order log (<span id="logCount">0</span>)</button>
   </div>
 
-  <div id="toast" class="toast">Order successfully submitted and logged!</div>
+  <div id="toast" class="toast">Order successfully submitted and synced to cloud!</div>
 
   <!-- NEW ORDER VIEW -->
   <div id="viewNew">
@@ -354,19 +373,59 @@
 
 </div>
 
-<script>
-  let currentItems = [];
-  let orders = [];
-  let orderCounter = 1001;
+<!-- FIREBASE SDK & APP LOGIC -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+  import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 
-  // Master credentials to protect exports and deletions
+  const firebaseConfig = {
+    apiKey: "AIzaSyCeF3O3NREiceGkvFsOnWVVV_IsebdBbOk",
+    authDomain: "sales-order-form-be608.firebaseapp.com",
+    databaseURL: "https://sales-order-form-be608-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "sales-order-form-be608",
+    storageBucket: "sales-order-form-be608.firebasestorage.app",
+    messagingSenderId: "775141194009",
+    appId: "1:775141194009:web:7473720e79d72bb589ed88",
+    measurementId: "G-33KMJPWFD4"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const auth = getAuth(app);
+
+  let currentItems = [];
+  window.orders = [];
   const AUTH_PASSCODE = "AEMC1995";
+
+  // Authentication State Monitor
+  onAuthStateChanged(auth, (user) => {
+    const overlay = document.getElementById('loginOverlay');
+    if (user) {
+      overlay.style.display = 'none';
+    } else {
+      overlay.style.display = 'flex';
+    }
+  });
+
+  window.handleLogin = async function() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const errDiv = document.getElementById('loginError');
+
+    errDiv.style.display = 'none';
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      errDiv.textContent = "Invalid email or password. Please try again.";
+      errDiv.style.display = 'block';
+    }
+  };
 
   function checkAuth() {
     const entered = prompt("Enter authorization passcode:");
-    if (entered === null) {
-      return false;
-    }
+    if (entered === null) return false;
     if (entered !== AUTH_PASSCODE) {
       alert("Incorrect passcode. Access denied.");
       return false;
@@ -374,14 +433,28 @@
     return true;
   }
 
-  // Initialize app immediately on load
   window.onload = function() {
-    loadStorage();
     const options = { month: 'short', day: 'numeric', year: 'numeric' };
     document.getElementById('orderDate').value = new Date().toLocaleDateString('en-US', options);
+    initRealtimeListener();
   };
 
-  function switchTab(tab) {
+  // Real-time synchronization listener for Firestore
+  function initRealtimeListener() {
+    const q = query(collection(db, "orders"), orderBy("timestamp", "desc"));
+    onSnapshot(q, (snapshot) => {
+      window.orders = [];
+      snapshot.forEach((docSnap) => {
+        window.orders.push({ docId: docSnap.id, ...docSnap.data() });
+      });
+      document.getElementById('logCount').textContent = window.orders.length;
+      if (document.getElementById('viewLog').style.display !== 'none') {
+        renderLog();
+      }
+    });
+  }
+
+  window.switchTab = function(tab) {
     const isNew = tab === 'new';
     document.getElementById('viewNew').style.display = isNew ? 'block' : 'none';
     document.getElementById('viewLog').style.display = isNew ? 'none' : 'block';
@@ -390,7 +463,7 @@
     if (!isNew) renderLog();
   }
 
-  function addItemToOrder() {
+  window.addItemToOrder = function() {
     const prodName = document.getElementById('inputProduct').value.trim();
     const qty = parseInt(document.getElementById('inputQty').value) || 0;
     const price = parseFloat(document.getElementById('inputPrice').value) || 0;
@@ -446,12 +519,12 @@
     document.getElementById('grandTotal').textContent = grandTotal.toFixed(2);
   }
 
-  function removeItem(index) {
+  window.removeItem = function(index) {
     currentItems.splice(index, 1);
     renderCurrentItems();
   }
 
-  function resetForm() {
+  window.resetForm = function() {
     document.getElementById('salesmanName').value = '';
     document.getElementById('custName').value = '';
     document.getElementById('custAddress').value = '';
@@ -463,7 +536,7 @@
     renderCurrentItems();
   }
 
-  function submitOrder() {
+  window.submitOrder = async function() {
     const custName = document.getElementById('custName').value.trim();
     if (!custName) {
       alert("Please enter the customer name.");
@@ -478,7 +551,7 @@
     const grandTotal = currentItems.reduce((acc, item) => acc + item.total, 0);
 
     const orderObj = {
-      id: orderCounter++,
+      id: Date.now().toString().slice(-6), // Generates a clean sequential ID suffix
       date: document.getElementById('orderDate').value,
       timestamp: new Date().toISOString(),
       salesman: document.getElementById('salesmanName').value.trim() || 'N/A',
@@ -489,46 +562,25 @@
       total: grandTotal
     };
 
-    orders.unshift(orderObj);
-    saveStorage();
-
-    const toast = document.getElementById('toast');
-    toast.style.display = 'block';
-    setTimeout(() => { toast.style.display = 'none'; }, 3500);
-
-    resetForm();
-  }
-
-  function loadStorage() {
-    const saved = localStorage.getItem('orderpad_orders_v2');
-    if (saved) {
-      try { orders = JSON.parse(saved); } catch(e) { orders = []; }
+    try {
+      await addDoc(collection(db, "orders"), orderObj);
+      const toast = document.getElementById('toast');
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 3500);
+      resetForm();
+    } catch (e) {
+      alert("Error submitting order to cloud: " + e.message);
     }
-    const savedCounter = localStorage.getItem('orderpad_counter_v2');
-    if (savedCounter) {
-      orderCounter = parseInt(savedCounter, 10);
-    }
-    updateLogCount();
   }
 
-  function saveStorage() {
-    localStorage.setItem('orderpad_orders_v2', JSON.stringify(orders));
-    localStorage.setItem('orderpad_counter_v2', orderCounter);
-    updateLogCount();
-  }
-
-  function updateLogCount() {
-    document.getElementById('logCount').textContent = orders.length;
-  }
-
-  function renderLog() {
+  window.renderLog = function() {
     const container = document.getElementById('logContainer');
-    const query = document.getElementById('logSearch').value.toLowerCase();
+    const queryStr = document.getElementById('logSearch').value.toLowerCase();
     
-    const filtered = orders.filter(o => 
-      o.customer.toLowerCase().includes(query) || 
-      o.salesman.toLowerCase().includes(query) ||
-      String(o.id).includes(query)
+    const filtered = window.orders.filter(o => 
+      o.customer.toLowerCase().includes(queryStr) || 
+      o.salesman.toLowerCase().includes(queryStr) ||
+      String(o.id).includes(queryStr)
     );
 
     if (filtered.length === 0) {
@@ -546,7 +598,7 @@
               <div class="meta">Salesman: ${escapeHtml(o.salesman)} &bull; ${o.date}</div>
             </div>
             <div style="text-align:right;">
-              <span class="pill">Submitted</span>
+              <span class="pill">Synced</span>
               <span class="amt">${o.total.toFixed(2)}</span>
             </div>
           </summary>
@@ -574,7 +626,7 @@
               </tbody>
             </table>
             <div style="text-align:right; margin-top:10px;">
-              <button class="btn danger small" onclick="deleteOrder(${o.id})">Delete Order</button>
+              <button class="btn danger small" onclick="deleteOrder('${o.docId}', '${o.id}')">Delete Order</button>
             </div>
           </div>
         </details>
@@ -583,34 +635,40 @@
     container.innerHTML = html;
   }
 
-  function deleteOrder(id) {
+  window.deleteOrder = async function(docId, orderId) {
     if (!checkAuth()) return;
-    if (confirm(`Are you sure you want to delete order #${id}?`)) {
-      orders = orders.filter(o => o.id !== id);
-      saveStorage();
-      renderLog();
+    if (confirm(`Are you sure you want to delete order #${orderId}?`)) {
+      try {
+        await deleteDoc(doc(db, "orders", docId));
+      } catch (e) {
+        alert("Error deleting order: " + e.message);
+      }
     }
   }
 
-  function clearAllOrders() {
+  window.clearAllOrders = async function() {
     if (!checkAuth()) return;
-    if (confirm("Are you sure you want to clear all saved logs?")) {
-      orders = [];
-      saveStorage();
-      renderLog();
+    if (confirm("Are you sure you want to clear all cloud-saved logs?")) {
+      try {
+        const querySnapshot = await getDocs(collection(db, "orders"));
+        const deletePromises = querySnapshot.docs.map((d) => deleteDoc(doc(db, "orders", d.id)));
+        await Promise.all(deletePromises);
+      } catch (e) {
+        alert("Error clearing orders: " + e.message);
+      }
     }
   }
 
-  function exportCSV() {
+  window.exportCSV = function() {
     if (!checkAuth()) return;
-    if (orders.length === 0) {
+    if (window.orders.length === 0) {
       alert("No orders available to export.");
       return;
     }
 
     let csvContent = "Order ID,Date,Salesman,Customer,Address,Product,Quantity,Unit Price,Line Total,Order Notes\r\n";
 
-    orders.forEach(o => {
+    window.orders.forEach(o => {
       o.items.forEach(i => {
         const row = [
           o.id,
